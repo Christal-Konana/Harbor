@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Harbor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #0D1413; }
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)) 12px;
+  }
+  #root { width: 100%; display: flex; justify-content: center; }
+  
+  /* Custom Scrollbar */
+  .harbor-scroll::-webkit-scrollbar { width: 0; height: 0; }
+  .harbor-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+  
+  input[type="file"] { display: none; }
+  
+  /* Keyframes */
+  @keyframes harbor-pop { 0% { transform: scale(0.92) translateY(10px); opacity: 0; } 100% { transform: scale(1) translateY(0); opacity: 1; } }
+  @keyframes harbor-slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  @keyframes harbor-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes harbor-spin { to { transform: rotate(360deg); } }
+  @keyframes wave-pulse { 0%, 100% { height: 6px; } 50% { height: 22px; } }
+
+  .harbor-pop { animation: harbor-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  .harbor-sheet { animation: harbor-slide-up 0.35s cubic-bezier(0.32, 0.72, 0, 1) forwards; }
+  .harbor-fade { animation: harbor-fade 0.22s ease forwards; }
+  
+  @media (prefers-reduced-motion: reduce) { 
+    .harbor-pop, .harbor-sheet, .harbor-fade { animation: none !important; } 
+  }
+</style>
+</head>
+<body>
+<div id="root">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;gap:16px;font-family:'Plus Jakarta Sans',sans-serif;color:#8A9A96;">
+    <div style="width:36px;height:36px;border-radius:50%;border:3px solid rgba(47,93,90,0.2);border-top-color:#2F5D5A;animation:harbor-spin .8s linear infinite;"></div>
+    <span style="font-size:14px;letter-spacing:0.02em;">Setting sail with Harbor…</span>
+  </div>
+</div>
+
+<script>
+  window.addEventListener("error", function (e) {
+    var root = document.getElementById("root");
+    if (root) {
+      root.innerHTML = '<div style="padding:32px 20px;font-family:\'Plus Jakarta Sans\',sans-serif;color:#17302E;max-width:360px;margin:40px auto;text-align:center;background:#FFFDF9;border-radius:24px;">' +
+        '<p style="font-family:Fraunces,serif;font-size:18px;font-weight:600;margin-bottom:8px;color:#17302E;">Harbor ran into rough seas.</p>' +
+        '<p style="font-size:13px;color:#6A7A76;word-break:break-word;line-height:1.5;">' + (e.message || "Unknown error occurred.") + '</p>' +
+        '</div>';
+    }
+  });
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ---------- Themes & Palette ---------- */
+const LIGHT = { 
+  ink: "#12201E", 
+  harbor: "#24524F", 
+  harborSoft: "#E3ECE9", 
+  mist: "#F2F5F4", 
+  mistDeep: "#E1E8E5", 
+  sand: "#F7F3EC", 
+  sandDark: "#EADFCF",
+  clay: "#C66343", 
+  driftwood: "#72807C", 
+  card: "#FFFFFF", 
+  overlay: "rgba(18, 32, 30, 0.45)", 
+  pageTop: "#F4F7F6", 
+  pageBottom: "#EAEFEF" 
+};
+
+const DARK = { 
+  ink: "#F0F5F4", 
+  harbor: "#529B94", 
+  harborSoft: "#1B2D2B", 
+  mist: "#1A2221", 
+  mistDeep: "#263230", 
+  sand: "#212220", 
+  sandDark: "#2F312D",
+  clay: "#E27B5B", 
+  driftwood: "#8E9E9A", 
+  card: "#121817", 
+  overlay: "rgba(0,0,0,0.75)", 
+  pageTop: "#0C1110", 
+  pageBottom: "#121A19" 
+};
+
+const POV_SWATCHES = ["#24524F","#4A6375","#786C5E","#C66343","#6E5B7B","#4B6E70","#984B4B","#4E7355","#A67C37","#804B70"];
+const MAX_VIDEO_BYTES = 10 * 1024 * 1024; // 10MB limit
+
+/* ---------- Icon Set ---------- */
+function Icon({ children, size = 20, color = "currentColor", fill = "none", strokeWidth = 2, ...rest }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" {...rest}>{children}</svg>;
+}
+const IconGrid = (p) => <Icon {...p}><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></Icon>;
+const IconFolder = (p) => <Icon {...p}><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></Icon>;
+const IconCalendar = (p) => <Icon {...p}><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></Icon>;
+const IconPlus = (p) => <Icon {...p}><path d="M12 5v14M5 12h14"/></Icon>;
+const IconFlame = (p) => <Icon {...p}><path d="M12 2c1 3-2 5-2 8a4 4 0 0 0 8 0c0-1.5-1-2-1-3.5 2 1 3 3 3 5.5a6 6 0 0 1-12 0c0-4 3-6 4-10Z"/></Icon>;
+const IconChevronLeft = (p) => <Icon {...p}><path d="m15 18-6-6 6-6"/></Icon>;
+const IconChevronRight = (p) => <Icon {...p}><path d="m9 18 6-6-6-6"/></Icon>;
+const IconImagePlus = (p) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/><path d="M16 4h4M18 2v4"/></Icon>;
+const IconTrash = (p) => <Icon {...p}><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></Icon>;
+const IconArrowLeft = (p) => <Icon {...p}><path d="M19 12H5M12 19l-7-7 7-7"/></Icon>;
+const IconEdit = (p) => <Icon {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></Icon>;
+const IconShare = (p) => <Icon {...p}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/></Icon>;
+const IconSun = (p) => <Icon {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></Icon>;
+const IconMoon = (p) => <Icon {...p}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></Icon>;
+const IconUser = (p) => <Icon {...p}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></Icon>;
+const IconGlobe = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></Icon>;
+const IconSearch = (p) => <Icon {...p}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></Icon>;
+const IconMic = (p) => <Icon {...p}><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></Icon>;
+const IconCheck = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12"/></Icon>;
+const IconHistory = (p) => <Icon {...p}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/></Icon>;
+
+/* ---------- Helpers ---------- */
+function isoDate(d) { const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0"); return `${y}-${m}-${day}`; }
+function prettyDate(iso) { const d = new Date(iso+"T00:00:00"); return d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}); }
+function fullTimestamp(ms) { const d = new Date(ms); return d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}) + " • " + d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}); }
+function safeParse(str, fallback) { try { const v = JSON.parse(str); return v == null ? fallback : v; } catch (e) { return fallback; } }
+function addDays(iso, delta) { const d = new Date(iso+"T00:00:00"); d.setDate(d.getDate()+delta); return isoDate(d); }
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    readFileAsDataUrl(file).then((raw) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not load image"));
+      img.onload = () => {
+        const maxDim = 800;
+        let { width, height } = img;
+        if (width > height && width > maxDim) { height = Math.round(height*maxDim/width); width = maxDim; }
+        else if (height >= width && height > maxDim) { width = Math.round(width*maxDim/height); height = maxDim; }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.src = raw;
+    }).catch(reject);
+  });
+}
+
+function makeVideoPoster(videoDataUrl) {
+  return new Promise((resolve) => {
+    const vid = document.createElement("video");
+    vid.src = videoDataUrl;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.addEventListener("loadeddata", () => { try { vid.currentTime = Math.min(0.2, vid.duration/2 || 0.1); } catch(e) { resolve(null); } });
+    vid.addEventListener("seeked", () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const maxDim = 600;
+        let w = vid.videoWidth || 320, h = vid.videoHeight || 240;
+        if (w > h && w > maxDim) { h = Math.round(h*maxDim/w); w = maxDim; } else if (h >= w && h > maxDim) { w = Math.round(w*maxDim/h); h = maxDim; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(vid, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      } catch (e) { resolve(null); }
+    });
+    vid.addEventListener("error", () => resolve(null));
+    setTimeout(() => resolve(null), 3000);
+  });
+}
+
+function getAudioDuration(dataUrl) {
+  return new Promise((resolve) => {
+    const audio = document.createElement("audio");
+    audio.preload = "metadata";
+    audio.src = dataUrl;
+    audio.addEventListener("loadedmetadata", () => resolve(isFinite(audio.duration) ? Math.round(audio.duration) : null));
+    audio.addEventListener("error", () => resolve(null));
+    setTimeout(() => resolve(null), 3000);
+  });
+}
+
+function formatDuration(sec) {
+  if (sec === null || sec === undefined || isNaN(sec)) return "0:00";
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+async function processMediaFile(file) {
+  const isVideo = file.type.startsWith("video");
+  const isAudio = file.type.startsWith("audio");
+  if (isVideo) {
+    if (file.size > MAX_VIDEO_BYTES) throw new Error(`"${file.name}" is over 10MB limit.`);
+    const dataUrl = await readFileAsDataUrl(file);
+    const posterDataUrl = await makeVideoPoster(dataUrl);
+    return { type: "video", dataUrl, posterDataUrl };
+  }
+  if (isAudio) {
+    if (file.size > MAX_VIDEO_BYTES) throw new Error(`"${file.name}" is too large.`);
+    const dataUrl = await readFileAsDataUrl(file);
+    const duration = await getAudioDuration(dataUrl);
+    return { type: "audio", dataUrl, posterDataUrl: null, duration };
+  }
+  const dataUrl = await compressImage(file);
+  return { type: "image", dataUrl, posterDataUrl: null };
+}
+
+function useStorage() {
+  const memory = useRef({});
+  const available = typeof window !== "undefined" && window.storage;
+  async function get(key, shared) {
+    if (available) { try { const r = await window.storage.get(key, !!shared); return r ? r.value : null; } catch (e) { return null; } }
+    return memory.current[key] || null;
+  }
+  async function set(key, value, shared) {
+    if (available) { try { await window.storage.set(key, value, !!shared); return true; } catch (e) { return false; } }
+    memory.current[key] = value; return true;
+  }
+  async function del(key, shared) {
+    if (available) { try { await window.storage.delete(key, !!shared); return true; } catch (e) { return false; } }
+    delete memory.current[key]; return true;
+  }
+  async function list(prefix, shared) {
+    if (available) { try { const r = await window.storage.list(prefix, !!shared); return r ? r.keys : []; } catch (e) { return []; } }
+    return [];
+  }
+  return { get, set, del, list };
+}
+
+/* ---------- Shared Components ---------- */
+function MasonryTile({ item, colors, onClick, selectable, selected }) {
+  const media = item.media;
+  return (
+    <div 
+      onClick={onClick} 
+      style={{ 
+        position: "relative",
+        borderRadius: 18, 
+        overflow: "hidden", 
+        marginBottom: 10, 
+        background: colors.mist, 
+        border: selected ? `2.5px solid ${colors.harbor}` : `1px solid ${colors.mistDeep}`,
+        boxShadow: "0 4px 12px rgba(0,0,0,0.03)",
+        cursor: "pointer",
+        breakInside: "avoid",
+        transition: "transform 0.15s ease, box-shadow 0.15s ease"
+      }}
+    >
+      {media ? (
+        media.type === "audio" ? (
+          <div style={{ padding: "16px 14px", background: colors.mist, display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ width: 38, height: 38, borderRadius: "50%", background: colors.harbor, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
+              <IconMic size={18} color="#FFF" />
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600, letterSpacing: "-0.01em" }}>Voice Note</div>
+              <div style={{ fontSize: 11, color: colors.driftwood, marginTop: 2 }}>{formatDuration(media.duration)}</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ position: "relative", width: "100%", overflow: "hidden" }}>
+            <img src={media.type === "video" ? (media.posterDataUrl || media.dataUrl) : media.dataUrl} alt="" style={{ width: "100%", display: "block", objectFit: "cover" }} />
+            {media.type === "video" && (
+              <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7Z" fill="white" /></svg>
+              </span>
+            )}
+            {item.entry && item.entry.note && (
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "24px 10px 8px", background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)", color: "#FFF", fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.entry.note}
+              </div>
+            )}
+          </div>
+        )
+      ) : (
+        <div style={{ padding: "16px 14px", background: colors.sand, minHeight: 70, display: "flex", alignItems: "center" }}>
+          <p style={{ margin: 0, fontSize: 13.5, color: colors.ink, lineHeight: 1.45, fontWeight: 500, whiteSpace: "pre-wrap", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            {item.entry && item.entry.note ? item.entry.note : <span style={{ color: colors.driftwood, fontStyle: "italic" }}>Empty note</span>}
+          </p>
+        </div>
+      )}
+      {selectable && (
+        <span style={{ position: "absolute", top: 8, left: 8, width: 22, height: 22, borderRadius: "50%", background: selected ? colors.harbor : "rgba(255,255,255,0.85)", border: selected ? "none" : `1.5px solid ${colors.driftwood}`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.15)" }}>
+          {selected && <IconCheck size={13} color="#FFF" strokeWidth={3} />}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PovCard({ name, color, cover, caption, shared, colors, onClick }) {
+  return (
+    <div 
+      onClick={onClick} 
+      style={{ 
+        position: "relative", 
+        borderRadius: 20, 
+        overflow: "hidden", 
+        marginBottom: 10, 
+        background: colors.mist, 
+        cursor: "pointer", 
+        breakInside: "avoid",
+        boxShadow: "0 6px 16px rgba(0,0,0,0.04)",
+        border: `1px solid ${colors.mistDeep}`
+      }}
+    >
+      {cover ? (
+        <img src={cover.type === "video" ? (cover.posterDataUrl || cover.dataUrl) : cover.dataUrl} alt="" style={{ width: "100%", aspectRatio: "4/5", objectFit: "cover", display: "block" }} />
+      ) : (
+        <div style={{ aspectRatio: "4/5", background: `linear-gradient(135deg, ${color}DD, ${color})`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <IconFolder size={32} color="rgba(255,255,255,0.8)" />
+        </div>
+      )}
+      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(18,32,30,0.85) 0%, rgba(18,32,30,0.2) 60%, transparent 100%)", display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "14px 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: "0 0 0 2px rgba(255,255,255,0.8)" }} />
+          <span style={{ fontFamily: "Fraunces, serif", fontSize: 15, fontWeight: 600, color: "#FFF", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
+          <span>{caption}</span>
+          {shared && <span>• Shared</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Main Application ---------- */
+function HarborApp() {
+  const storage = useStorage();
+  const [loading, setLoading] = useState(true);
+
+  const [profile, setProfile] = useState({ name: "Navigator", avatar: null, theme: "light" });
+  const [povs, setPovs] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [media, setMedia] = useState([]);
+
+  const C = profile.theme === "dark" ? DARK : LIGHT;
+
+  const [mainTab, setMainTab] = useState("photos"); // photos | povs | calendar
+  const [povsViewMode, setPovsViewMode] = useState("mine"); // mine | shared
+  const [sharedPovs, setSharedPovs] = useState([]);
+  const [sharedLoading, setSharedLoading] = useState(false);
+  const [viewingSharedId, setViewingSharedId] = useState(null);
+
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [povDetailId, setPovDetailId] = useState(null);
+  const [povSubFilter, setPovSubFilter] = useState("all");
+  const [dayViewDate, setDayViewDate] = useState(null);
+
+  const [viewEntryId, setViewEntryId] = useState(null);
+  const [activeMediaIndex, setActiveMediaIndex] = useState(0);
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [draftNote, setDraftNote] = useState("");
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [addMediaList, setAddMediaList] = useState([]);
+  const [addNote, setAddNote] = useState("");
+  const [addTags, setAddTags] = useState([]);
+  const [addProcessing, setAddProcessing] = useState("");
+
+  const [showNewPovModal, setShowNewPovModal] = useState(false);
+  const [newPovName, setNewPovName] = useState("");
+  const [newPovColor, setNewPovColor] = useState(POV_SWATCHES[0]);
+  const [newPovDescription, setNewPovDescription] = useState("");
+  const [newPovTargetEntryId, setNewPovTargetEntryId] = useState(null);
+
+  const [editPovId, setEditPovId] = useState(null);
+  const [editDraft, setEditDraft] = useState({ name: "", description: "", color: POV_SWATCHES[0] });
+
+  const [addSubsectionFor, setAddSubsectionFor] = useState(null);
+  const [newSubsectionName, setNewSubsectionName] = useState("");
+
+  const [confirmDeletePov, setConfirmDeletePov] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [toast, setToast] = useState("");
+  const [toastAction, setToastAction] = useState(null);
+
+  const [showNoteHistoryFor, setShowNoteHistoryFor] = useState(null);
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedEntryIds, setSelectedEntryIds] = useState(() => new Set());
+
+  const [showPhotosSearch, setShowPhotosSearch] = useState(false);
+  const [photosSearch, setPhotosSearch] = useState("");
+
+  const [streakCelebration, setStreakCelebration] = useState(null);
+
+  const [calMonth, setCalMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+
+  const fileInputRef = useRef(null);
+  const avatarInputRef = useRef(null);
+  const addNoteRef = useRef(null);
+  const draftNoteRef = useRef(null);
+  const toastTimer = useRef(null);
+  const celebrationTimer = useRef(null);
+
+  /* Audio Recorder State */
+  const mediaRecorderRef = useRef(null);
+  const recordedChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+  const recordingSecondsRef = useRef(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+
+  const MAX_RECORD_SECONDS = 180;
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("audio/webm")) ? "audio/webm" : "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      recordedChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+        const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const finalDuration = recordingSecondsRef.current;
+        setIsRecording(false);
+        setRecordingSeconds(0);
+        if (blob.size === 0) return;
+        if (blob.size > MAX_VIDEO_BYTES) { showToast("Recording exceeds size limits."); return; }
+        try {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error("Read failed"));
+            reader.readAsDataURL(blob);
+          });
+          setAddMediaList((prev) => [...prev, { tempId: "t" + Date.now(), type: "audio", dataUrl, posterDataUrl: null, duration: finalDuration }]);
+        } catch (e) { showToast("Could not save recording"); }
+      };
+      mediaRecorderRef.current = recorder;
+      recordingSecondsRef.current = 0;
+      setRecordingSeconds(0);
+      recorder.start();
+      setIsRecording(true);
+      recordingTimerRef.current = setInterval(() => {
+        recordingSecondsRef.current += 1;
+        setRecordingSeconds(recordingSecondsRef.current);
+        if (recordingSecondsRef.current >= MAX_RECORD_SECONDS) stopRecording();
+      }, 1000);
+    } catch (err) {
+      showToast("Microphone access denied.");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") mediaRecorderRef.current.stop();
+  }
+
+  function autoGrow(el) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const p = await storage.get("harbor-profile");
+      const c = await storage.get("harbor-povs");
+      const e = await storage.get("harbor-entries");
+      const m = await storage.get("harbor-media");
+      if (!cancelled) {
+        setProfile(safeParse(p, { name: "Navigator", avatar: null, theme: "light" }));
+        setPovs(safeParse(c, []));
+        setEntries(safeParse(e, []));
+        setMedia(safeParse(m, []));
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    document.body.style.background = `linear-gradient(180deg, ${C.pageTop} 0%, ${C.pageBottom} 100%)`;
+  }, [C]);
+
+  useEffect(() => { setActiveMediaIndex(0); }, [viewEntryId]);
+  useEffect(() => { if (showAdd) setTimeout(() => autoGrow(addNoteRef.current), 50); }, [showAdd]);
+  useEffect(() => { if (isEditingNote) setTimeout(() => autoGrow(draftNoteRef.current), 50); }, [isEditingNote]);
+
+  const persistProfile = useCallback(async (next) => { setProfile(next); await storage.set("harbor-profile", JSON.stringify(next)); }, []);
+  const persistPovs = useCallback(async (next) => { setPovs(next); await storage.set("harbor-povs", JSON.stringify(next)); }, []);
+  const persistEntries = useCallback(async (next) => { setEntries(next); await storage.set("harbor-entries", JSON.stringify(next)); }, []);
+  const persistMedia = useCallback(async (next) => { setMedia(next); await storage.set("harbor-media", JSON.stringify(next)); }, []);
+
+  function showToast(msg, action) {
+    setToast(msg);
+    setToastAction(action || null);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => { setToast(""); setToastAction(null); }, action ? 5000 : 2500);
+  }
+
+  function mediaById(id) { return media.find((m) => m.id === id) || null; }
+  function povById(id) { return povs.find((p) => p.id === id) || null; }
+
+  async function publishSharedSnapshot(povId, povsArr, entriesArr, mediaArr) {
+    const pov = povsArr.find((p) => p.id === povId);
+    if (!pov || !pov.shared) return;
+    const relatedEntries = entriesArr.filter((e) => e.tags.some((t) => t.povId === povId));
+    const neededIds = new Set();
+    relatedEntries.forEach((e) => e.mediaIds.forEach((id) => neededIds.add(id)));
+    const relatedMedia = mediaArr.filter((m) => neededIds.has(m.id));
+    const snapshot = { pov, entries: relatedEntries, media: relatedMedia, sharedAt: Date.now() };
+    await storage.set(`shared-pov:${povId}`, JSON.stringify(snapshot), true);
+  }
+
+  async function setPovShared(povId, shared) {
+    const next = povs.map((p) => (p.id === povId ? { ...p, shared } : p));
+    await persistPovs(next);
+    if (shared) {
+      await publishSharedSnapshot(povId, next, entries, media);
+      showToast("POV link shared publicly");
+    } else {
+      await storage.del(`shared-pov:${povId}`, true);
+      showToast("POV made private");
+    }
+  }
+
+  async function loadSharedPovs() {
+    setSharedLoading(true);
+    const keys = await storage.list("shared-pov:", true);
+    const list = [];
+    for (const k of keys) {
+      const v = await storage.get(k, true);
+      const parsed = safeParse(v, null);
+      if (parsed) list.push(parsed);
+    }
+    setSharedPovs(list.sort((a, b) => (b.sharedAt || 0) - (a.sharedAt || 0)));
+    setSharedLoading(false);
+  }
+
+  function computeStreak(povId, entriesArr) {
+    const dates = new Set(entriesArr.filter((e) => e.tags.some((t) => t.povId === povId)).map((e) => isoDate(new Date(e.createdAt))));
+    let count = 0, cursor = new Date();
+    if (!dates.has(isoDate(cursor))) cursor.setDate(cursor.getDate() - 1);
+    while (dates.has(isoDate(cursor))) { count++; cursor.setDate(cursor.getDate() - 1); }
+    return count;
+  }
+  function getStreak(povId) { return computeStreak(povId, entries); }
+
+  function povTilesFor(povId, subFilter) {
+    const tagged = entries.filter((e) => e.tags.some((t) => t.povId === povId && (subFilter === "all" || (t.subsectionId || "none") === subFilter)));
+    const sorted = tagged.slice().sort((a, b) => b.createdAt - a.createdAt);
+    const tiles = [];
+    sorted.forEach((e) => {
+      if (e.mediaIds.length === 0) { tiles.push({ entry: e, media: null }); }
+      else e.mediaIds.forEach((id) => { const m = mediaById(id); if (m) tiles.push({ entry: e, media: m }); });
+    });
+    return tiles;
+  }
+
+  function allPhotoTiles() {
+    const sorted = entries.slice().sort((a, b) => b.createdAt - a.createdAt);
+    const tiles = [];
+    sorted.forEach((e) => {
+      if (e.mediaIds.length === 0) tiles.push({ entry: e, media: null });
+      else e.mediaIds.forEach((id) => { const m = mediaById(id); if (m) tiles.push({ entry: e, media: m }); });
+    });
+    return tiles;
+  }
+
+  function matchesSearch(entry) {
+    const q = photosSearch.trim().toLowerCase();
+    if (!q) return true;
+    if ((entry.note || "").toLowerCase().includes(q)) return true;
+    return entry.tags.some((t) => { const p = povById(t.povId); return p && p.name.toLowerCase().includes(q); });
+  }
+
+  function toggleSelectEntry(entryId) {
+    setSelectedEntryIds((prev) => { const next = new Set(prev); if (next.has(entryId)) next.delete(entryId); else next.add(entryId); return next; });
+  }
+  function exitSelectMode() { setSelectMode(false); setSelectedEntryIds(new Set()); }
+
+  async function batchDeleteSelected() {
+    const ids = Array.from(selectedEntryIds);
+    exitSelectMode();
+    await deleteEntries(ids);
+  }
+
+  function openAddSheet(prefillPovId) {
+    setAddMediaList([]);
+    setAddNote("");
+    setAddTags(prefillPovId ? [{ povId: prefillPovId, subsectionId: null }] : []);
+    setAddProcessing("");
+    setShowAdd(true);
+  }
+
+  async function handleFilesChosen(e) {
+    const files = Array.from(e.target.files || []);
+    for (let i = 0; i < files.length; i++) {
+      setAddProcessing(`Compressing ${i + 1} of ${files.length}…`);
+      try {
+        const result = await processMediaFile(files[i]);
+        setAddMediaList((prev) => [...prev, { tempId: "t" + Date.now() + i, ...result }]);
+      } catch (err) {
+        showToast(err.message || "Failed to add media");
+      }
+    }
+    setAddProcessing("");
+    e.target.value = "";
+  }
+
+  function toggleAddTag(povId) {
+    setAddTags((prev) => prev.some((t) => t.povId === povId) ? prev.filter((t) => t.povId !== povId) : [...prev, { povId, subsectionId: null }]);
+  }
+
+  async function createPov(name, color, description) {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const pov = { id: "p" + Date.now(), name: trimmed, description: (description || "").trim(), color, coverMediaId: null, subsections: [], shared: false, createdAt: Date.now() };
+    await persistPovs([...povs, pov]);
+    return pov;
+  }
+
+  async function saveEntry() {
+    const hasNote = addNote.trim().length > 0;
+    const hasMedia = addMediaList.length > 0;
+    if (!hasNote && !hasMedia) return;
+    const preStreaks = addTags.map((t) => ({ povId: t.povId, streak: computeStreak(t.povId, entries) }));
+    const newMediaObjs = addMediaList.map((m, i) => ({ id: "m" + Date.now() + i, type: m.type, dataUrl: m.dataUrl, posterDataUrl: m.posterDataUrl, duration: m.duration, createdAt: Date.now() }));
+    const nextMedia = [...media, ...newMediaObjs];
+    const entry = { id: "e" + Date.now(), note: addNote.trim(), createdAt: Date.now(), editedAt: null, noteHistory: [], mediaIds: newMediaObjs.map((m) => m.id), tags: addTags };
+    const nextEntries = [entry, ...entries];
+    await persistMedia(nextMedia);
+    await persistEntries(nextEntries);
+    for (const t of addTags) await publishSharedSnapshot(t.povId, povs, nextEntries, nextMedia);
+    setShowAdd(false);
+    showToast(addTags.length ? `Saved to ${addTags.length} POV${addTags.length > 1 ? "s" : ""}` : "Entry added");
+
+    let best = null;
+    preStreaks.forEach(({ povId, streak }) => {
+      const after = computeStreak(povId, nextEntries);
+      if (after > streak && (!best || after > best.streak)) best = { povId, streak: after };
+    });
+    if (best) {
+      const pov = povs.find((p) => p.id === best.povId);
+      if (celebrationTimer.current) clearTimeout(celebrationTimer.current);
+      setStreakCelebration({ name: pov ? pov.name : "", streak: best.streak });
+      celebrationTimer.current = setTimeout(() => setStreakCelebration(null), 2000);
+    }
+  }
+
+  async function saveNoteEdit(entryId) {
+    const entry = entries.find((e) => e.id === entryId);
+    if (!entry) return;
+    const trimmed = draftNote.trim();
+    if (trimmed === (entry.note || "")) { setIsEditingNote(false); return; }
+    const historyAddition = entry.note ? [{ id: "h" + Date.now(), note: entry.note, savedAt: entry.editedAt || entry.createdAt }] : [];
+    const nextEntries = entries.map((e) => (e.id === entryId ? { ...e, note: trimmed, editedAt: Date.now(), noteHistory: [...historyAddition, ...(e.noteHistory || [])] } : e));
+    await persistEntries(nextEntries);
+    setIsEditingNote(false);
+    showToast("Note updated");
+  }
+
+  async function deleteEntries(ids) {
+    const deleted = entries.filter((e) => ids.includes(e.id));
+    if (deleted.length === 0) return;
+    const nextEntries = entries.filter((e) => !ids.includes(e.id));
+    await persistEntries(nextEntries);
+    showToast(deleted.length === 1 ? "Entry deleted" : `${deleted.length} entries deleted`);
+  }
+
+  const btnReset = { background: "transparent", border: "none", cursor: "pointer", padding: 6, display: "flex", alignItems: "center", justifyContent: "center" };
+
+  function Header({ title, subtitle }) {
+    return (
+      <div style={{ padding: "24px 20px 12px", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div>
+          <h1 style={{ fontFamily: "Fraunces, serif", fontWeight: 600, fontSize: 28, color: C.ink, margin: 0, letterSpacing: "-0.02em" }}>{title}</h1>
+          {subtitle && <p style={{ margin: "4px 0 0", fontSize: 13, color: C.driftwood, fontWeight: 500 }}>{subtitle}</p>}
+        </div>
+        <button onClick={() => setProfileOpen(true)} style={{ width: 38, height: 38, borderRadius: "50%", overflow: "hidden", border: `1.5px solid ${C.mistDeep}`, cursor: "pointer", background: C.mist, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          {profile.avatar ? <img src={profile.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconUser size={18} color={C.driftwood} />}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ 
+      width: "100%", 
+      maxWidth: 412, 
+      height: 820, 
+      maxHeight: "calc(100vh - 24px)", 
+      background: C.card, 
+      borderRadius: 36, 
+      boxShadow: "0 32px 80px -16px rgba(0,0,0,0.4)", 
+      display: "flex", 
+      flexDirection: "column", 
+      overflow: "hidden", 
+      position: "relative",
+      border: `1px solid ${C.mistDeep}`
+    }}>
+      
+      {/* ---------------- APP SHELL & TABS ---------------- */}
+      {loading ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: C.driftwood }}>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", border: `3px solid ${C.mistDeep}`, borderTopColor: C.harbor, animation: "harbor-spin 0.8s linear infinite" }} />
+        </div>
+      ) : profileOpen ? (
+        /* Profile Screen */
+        <div className="harbor-fade" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ padding: "20px 16px 12px", display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={() => setProfileOpen(false)} style={btnReset}><IconArrowLeft size={20} color={C.ink} /></button>
+            <h2 style={{ fontFamily: "Fraunces, serif", fontSize: 20, color: C.ink, margin: 0, fontWeight: 600 }}>Account & Preferences</h2>
+          </div>
+          <div className="harbor-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 20px 24px" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginBottom: 28 }}>
+              <button onClick={() => avatarInputRef.current && avatarInputRef.current.click()} style={{ width: 88, height: 88, borderRadius: "50%", overflow: "hidden", border: `2px solid ${C.harbor}`, cursor: "pointer", background: C.mist, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {profile.avatar ? <img src={profile.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconUser size={36} color={C.driftwood} />}
+              </button>
+              <input ref={avatarInputRef} type="file" accept="image/*" onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                if (f) compressImage(f).then((avatar) => persistProfile({ ...profile, avatar }));
+              }} />
+              <input value={profile.name} onChange={(e) => persistProfile({ ...profile, name: e.target.value })} style={{ textAlign: "center", fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 600, color: C.ink, border: "none", background: "transparent", outline: "none", width: "100%" }} />
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.driftwood, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>Appearance</div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 28 }}>
+              <button onClick={() => persistProfile({ ...profile, theme: "light" })} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 0", borderRadius: 14, border: profile.theme === "light" ? `2px solid ${C.harbor}` : `1px solid ${C.mistDeep}`, background: profile.theme === "light" ? C.harborSoft : "transparent", color: C.ink, cursor: "pointer", fontWeight: 600, fontSize: 13 }}><IconSun size={16} /> Light</button>
+              <button onClick={() => persistProfile({ ...profile, theme: "dark" })} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 0", borderRadius: 14, border: profile.theme === "dark" ? `2px solid ${C.harbor}` : `1px solid ${C.mistDeep}`, background: profile.theme === "dark" ? C.harborSoft : "transparent", color: C.ink, cursor: "pointer", fontWeight: 600, fontSize: 13 }}><IconMoon size={16} /> Dark</button>
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.driftwood, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>Data Management</div>
+            <button onClick={() => setConfirmClear(true)} style={{ width: "100%", background: "transparent", border: `1px solid ${C.clay}`, color: C.clay, borderRadius: 14, padding: "12px 0", fontSize: 13.5, cursor: "pointer", fontWeight: 600 }}>Reset All Local Data</button>
+          </div>
+        </div>
+      ) : povDetailId && povById(povDetailId) ? (
+        /* POV Detail View */
+        (() => {
+          const openPov = povById(povDetailId);
+          const tiles = povTilesFor(openPov.id, povSubFilter);
+          return (
+            <div className="harbor-fade" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+              <div style={{ padding: "16px 16px 8px", display: "flex", alignItems: "center", gap: 10 }}>
+                <button onClick={() => setPovDetailId(null)} style={btnReset}><IconArrowLeft size={20} color={C.ink} /></button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: openPov.color }} />
+                    <h2 style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, color: C.ink, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openPov.name}</h2>
+                  </div>
+                </div>
+                <button onClick={() => setPovShared(openPov.id, !openPov.shared)} style={btnReset}><IconShare size={18} color={openPov.shared ? C.harbor : C.driftwood} /></button>
+              </div>
+
+              <div className="harbor-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "8px 16px 20px" }}>
+                {tiles.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "40px 16px", color: C.driftwood }}>
+                    <p style={{ fontSize: 14, margin: "0 0 16px" }}>No captures in this POV yet.</p>
+                    <button onClick={() => openAddSheet(openPov.id)} style={{ background: C.harbor, color: "#FFF", border: "none", borderRadius: 999, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Add First Memory</button>
+                  </div>
+                ) : (
+                  <div style={{ columnCount: 2, columnGap: 10 }}>
+                    {tiles.map((item, i) => (
+                      <MasonryTile key={(item.media ? item.media.id : item.entry.id) + i} item={item} colors={C} onClick={() => setViewEntryId(item.entry.id)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()
+      ) : (
+        /* Main Navigation Views */
+        <React.Fragment>
+          {mainTab === "photos" && (
+            <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+              <div style={{ padding: "20px 20px 8px", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+                <div>
+                  <h1 style={{ fontFamily: "Fraunces, serif", fontWeight: 600, fontSize: 28, color: C.ink, margin: 0, letterSpacing: "-0.02em" }}>Harbor</h1>
+                  <p style={{ margin: "2px 0 0", fontSize: 12.5, color: C.driftwood, fontWeight: 500 }}>Your personal visual archive</p>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <button onClick={() => { setShowPhotosSearch((s) => !s); setPhotosSearch(""); }} style={btnReset}><IconSearch size={18} color={showPhotosSearch ? C.harbor : C.driftwood} /></button>
+                  <button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} style={{ ...btnReset, fontSize: 12, fontWeight: 700, color: selectMode ? C.harbor : C.driftwood, padding: "6px 8px" }}>{selectMode ? "Done" : "Select"}</button>
+                  <button onClick={() => setProfileOpen(true)} style={{ width: 34, height: 34, borderRadius: "50%", overflow: "hidden", border: `1px solid ${C.mistDeep}`, cursor: "pointer", background: C.mist, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>
+                    {profile.avatar ? <img src={profile.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconUser size={16} color={C.driftwood} />}
+                  </button>
+                </div>
+              </div>
+
+              {showPhotosSearch && (
+                <div style={{ padding: "0 20px 10px" }}>
+                  <input autoFocus value={photosSearch} onChange={(e) => setPhotosSearch(e.target.value)} placeholder="Search entries or notes..." style={{ width: "100%", border: `1px solid ${C.mistDeep}`, borderRadius: 12, padding: "8px 12px", fontSize: 13, outline: "none", background: C.mist, color: C.ink }} />
+                </div>
+              )}
+
+              <div className="harbor-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "8px 20px 20px" }}>
+                {(() => {
+                  const tiles = allPhotoTiles().filter((item) => matchesSearch(item.entry));
+                  if (tiles.length === 0) return (
+                    <div style={{ textAlign: "center", padding: "60px 20px", color: C.driftwood }}>
+                      <IconImagePlus size={32} color={C.driftwood} />
+                      <p style={{ fontSize: 14, fontWeight: 500, marginTop: 12 }}>No memories recorded yet.</p>
+                      <button onClick={() => openAddSheet()} style={{ marginTop: 8, background: C.harbor, color: "#FFF", border: "none", borderRadius: 999, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Capture Memory</button>
+                    </div>
+                  );
+                  return (
+                    <div style={{ columnCount: 2, columnGap: 10 }}>
+                      {tiles.map((item, i) => (
+                        <MasonryTile
+                          key={(item.media ? item.media.id : item.entry.id) + i}
+                          item={item}
+                          colors={C}
+                          selectable={selectMode}
+                          selected={selectedEntryIds.has(item.entry.id)}
+                          onClick={() => (selectMode ? toggleSelectEntry(item.entry.id) : setViewEntryId(item.entry.id))}
+                        />
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {mainTab === "povs" && (
+            <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+              {Header({ title: "POVs", subtitle: "Categorized points of view" })}
+              <div className="harbor-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "8px 20px 20px" }}>
+                {povs.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "60px 20px", color: C.driftwood }}>
+                    <IconFolder size={32} color={C.driftwood} />
+                    <p style={{ fontSize: 14, fontWeight: 500, marginTop: 12 }}>Group photos into active POVs.</p>
+                    <button onClick={() => setShowNewPovModal(true)} style={{ marginTop: 8, background: C.harbor, color: "#FFF", border: "none", borderRadius: 999, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Create POV</button>
+                  </div>
+                ) : (
+                  <div style={{ columnCount: 2, columnGap: 10 }}>
+                    {povs.map((p) => {
+                      const cover = p.coverMediaId ? mediaById(p.coverMediaId) : null;
+                      const count = entries.filter((e) => e.tags.some((t) => t.povId === p.id)).length;
+                      return (
+                        <PovCard key={p.id} name={p.name} color={p.color} cover={cover} caption={`${count} entries`} shared={p.shared} colors={C} onClick={() => setPovDetailId(p.id)} />
+                      );
+                    })}
+                    <button onClick={() => setShowNewPovModal(true)} style={{ border: `2px dashed ${C.mistDeep}`, borderRadius: 20, background: "transparent", cursor: "pointer", aspectRatio: "4/5", width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: C.driftwood, fontSize: 13, fontWeight: 600, breakInside: "avoid", marginBottom: 10 }}>
+                      <IconPlus size={20} />
+                      <span>New POV</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {mainTab === "calendar" && (
+            <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+              {Header({ title: "Timeline", subtitle: "Memories mapped across time" })}
+              <div style={{ padding: "0 20px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <button onClick={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))} style={btnReset}><IconChevronLeft size={20} color={C.ink} /></button>
+                <span style={{ fontFamily: "Fraunces, serif", fontSize: 16, fontWeight: 600, color: C.ink }}>
+                  {calMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                </span>
+                <button onClick={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1))} style={btnReset}><IconChevronRight size={20} color={C.ink} /></button>
+              </div>
+
+              <div className="harbor-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 20px 20px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+                  {["M","T","W","T","F","S","S"].map((d, i) => (
+                    <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: C.driftwood, paddingBottom: 6 }}>{d}</div>
+                  ))}
+                  {(() => {
+                    const year = calMonth.getFullYear(), month = calMonth.getMonth();
+                    const startWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    const cells = [];
+                    for (let i = 0; i < startWeekday; i++) cells.push(null);
+                    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+                    
+                    return cells.map((day, idx) => {
+                      if (day === null) return <div key={idx} />;
+                      const iso = isoDate(new Date(year, month, day));
+                      const dayEntries = entries.filter((e) => isoDate(new Date(e.createdAt)) === iso);
+                      const hasContent = dayEntries.length > 0;
+                      return (
+                        <div key={idx} style={{ aspectRatio: "1/1", borderRadius: 10, background: hasContent ? C.harborSoft : C.mist, border: `1px solid ${hasContent ? C.harbor : "transparent"}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                          <span style={{ fontSize: 12, fontWeight: hasContent ? 700 : 500, color: hasContent ? C.harbor : C.ink }}>{day}</span>
+                          {hasContent && <span style={{ width: 4, height: 4, borderRadius: "50%", background: C.harbor, marginTop: 2 }} />}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Navigation Bar */}
+          {selectMode ? (
+            <div style={{ padding: "12px 20px calc(12px + env(safe-area-inset-bottom))", borderTop: `1px solid ${C.mistDeep}`, background: C.card, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.driftwood }}>{selectedEntryIds.size} Selected</span>
+              <button onClick={batchDeleteSelected} disabled={selectedEntryIds.size === 0} style={{ background: selectedEntryIds.size === 0 ? C.mistDeep : C.clay, color: "#FFF", border: "none", borderRadius: 999, padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Delete</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", padding: "10px 16px calc(10px + env(safe-area-inset-bottom))", borderTop: `1px solid ${C.mistDeep}`, background: C.card }}>
+              <button onClick={() => setMainTab("photos")} style={{ ...btnReset, color: mainTab === "photos" ? C.harbor : C.driftwood, flex: 1, flexDirection: "column", gap: 3 }}>
+                <IconGrid size={20} />
+                <span style={{ fontSize: 10, fontWeight: 600 }}>Photos</span>
+              </button>
+              <button onClick={() => setMainTab("povs")} style={{ ...btnReset, color: mainTab === "povs" ? C.harbor : C.driftwood, flex: 1, flexDirection: "column", gap: 3 }}>
+                <IconFolder size={20} />
+                <span style={{ fontSize: 10, fontWeight: 600 }}>POVs</span>
+              </button>
+              
+              {/* Floating Add Trigger */}
+              <button onClick={() => openAddSheet()} style={{ width: 48, height: 48, borderRadius: "50%", background: C.harbor, color: "#FFF", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 16px rgba(36,82,79,0.35)", margin: "-18px 8px 0" }}>
+                <IconPlus size={24} />
+              </button>
+
+              <button onClick={() => setMainTab("calendar")} style={{ ...btnReset, color: mainTab === "calendar" ? C.harbor : C.driftwood, flex: 1, flexDirection: "column", gap: 3 }}>
+                <IconCalendar size={20} />
+                <span style={{ fontSize: 10, fontWeight: 600 }}>Timeline</span>
+              </button>
+            </div>
+          )}
+        </React.Fragment>
+      )}
+
+      {/* ---------------- MODALS & OVERLAYS ---------------- */}
+      
+      {/* Toast Bar */}
+      {toast && (
+        <div className="harbor-pop" style={{ position: "absolute", bottom: 84, left: "50%", transform: "translateX(-50%)", background: C.ink, color: C.card, padding: "10px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.2)" }}>
+          {toast}
+        </div>
+      )}
+
+      {/* Add Sheet */}
+      {showAdd && (
+        <div style={{ position: "absolute", inset: 0, background: C.overlay, backdropFilter: "blur(4px)", zIndex: 200, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+          <div className="harbor-sheet" style={{ background: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))", maxHeight: "90%", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h3 style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, margin: 0, color: C.ink }}>New Capture</h3>
+              <button onClick={() => setShowAdd(false)} style={btnReset}><IconPlus size={20} color={C.driftwood} style={{ transform: "rotate(45deg)" }} /></button>
+            </div>
+
+            <textarea 
+              ref={addNoteRef} 
+              value={addNote} 
+              onChange={(e) => { setAddNote(e.target.value); autoGrow(e.target); }} 
+              placeholder="Write a reflection or memory..." 
+              style={{ width: "100%", border: "none", outline: "none", background: "transparent", resize: "none", fontFamily: "inherit", fontSize: 15, color: C.ink, minHeight: 60, maxHeight: 140 }} 
+            />
+
+            {/* Media Preview Strip */}
+            {addMediaList.length > 0 && (
+              <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                {addMediaList.map((m) => (
+                  <div key={m.tempId} style={{ position: "relative", width: 72, height: 72, borderRadius: 12, overflow: "hidden", flexShrink: 0, background: C.mist }}>
+                    {m.type === "audio" ? (
+                      <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: C.harborSoft }}><IconMic size={20} color={C.harbor} /></div>
+                    ) : (
+                      <img src={m.dataUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    )}
+                    <button onClick={() => setAddMediaList((prev) => prev.filter((i) => i.tempId !== m.tempId))} style={{ position: "absolute", top: 4, right: 4, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", color: "#FFF", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Actions Bar */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${C.mistDeep}`, paddingTop: 12 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{ ...btnReset, background: C.mist, borderRadius: 12, padding: "8px 12px", color: C.ink, fontSize: 12, fontWeight: 600, gap: 6 }}>
+                  <IconImagePlus size={16} /> Attach Media
+                </button>
+                <input ref={fileInputRef} type="file" multiple accept="image/*,video/*" onChange={handleFilesChosen} />
+                
+                <button onClick={isRecording ? stopRecording : startRecording} style={{ ...btnReset, background: isRecording ? C.clay : C.mist, borderRadius: 12, padding: "8px 12px", color: isRecording ? "#FFF" : C.ink, fontSize: 12, fontWeight: 600, gap: 6 }}>
+                  <IconMic size={16} /> {isRecording ? `${recordingSeconds}s` : "Audio"}
+                </button>
+              </div>
+
+              <button onClick={saveEntry} disabled={!addNote.trim() && addMediaList.length === 0} style={{ background: C.harbor, color: "#FFF", border: "none", borderRadius: 999, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!addNote.trim() && addMediaList.length === 0) ? 0.5 : 1 }}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Entry Modal */}
+      {viewEntryId && entries.find((e) => e.id === viewEntryId) && (
+        (() => {
+          const entry = entries.find((e) => e.id === viewEntryId);
+          return (
+            <div style={{ position: "absolute", inset: 0, background: C.overlay, backdropFilter: "blur(6px)", zIndex: 200, display: "flex", flexDirection: "column" }}>
+              <div className="harbor-fade" style={{ flex: 1, background: C.card, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <div style={{ padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <button onClick={() => setViewEntryId(null)} style={btnReset}><IconArrowLeft size={20} color={C.ink} /></button>
+                  <span style={{ fontSize: 12, color: C.driftwood, fontWeight: 500 }}>{fullTimestamp(entry.createdAt)}</span>
+                  <button onClick={() => { deleteEntries([entry.id]); setViewEntryId(null); }} style={btnReset}><IconTrash size={18} color={C.clay} /></button>
+                </div>
+
+                <div className="harbor-scroll" style={{ flex: 1, overflowY: "auto", padding: "0 20px 20px" }}>
+                  {entry.mediaIds.length > 0 && (
+                    <div style={{ borderRadius: 20, overflow: "hidden", marginBottom: 16, background: C.mist }}>
+                      {(() => {
+                        const m = mediaById(entry.mediaIds[activeMediaIndex]);
+                        if (!m) return null;
+                        if (m.type === "audio") return (
+                          <div style={{ padding: 24, textAlign: "center" }}>
+                            <IconMic size={32} color={C.harbor} />
+                            <audio controls src={m.dataUrl} style={{ width: "100%", marginTop: 12 }} />
+                          </div>
+                        );
+                        return <img src={m.dataUrl} alt="" style={{ width: "100%", display: "block" }} />;
+                      })()}
+                    </div>
+                  )}
+
+                  {isEditingNote ? (
+                    <div>
+                      <textarea ref={draftNoteRef} value={draftNote} onChange={(e) => setDraftNote(e.target.value)} style={{ width: "100%", border: `1px solid ${C.mistDeep}`, borderRadius: 12, padding: 12, fontSize: 14, outline: "none", background: C.mist, color: C.ink, fontFamily: "inherit" }} />
+                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                        <button onClick={() => saveNoteEdit(entry.id)} style={{ background: C.harbor, color: "#FFF", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600 }}>Save</button>
+                        <button onClick={() => setIsEditingNote(false)} style={{ background: "transparent", color: C.driftwood, border: "none", fontSize: 12 }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                      <p style={{ fontSize: 15, color: C.ink, lineHeight: 1.5, margin: 0, flex: 1, whiteSpace: "pre-wrap" }}>{entry.note || <span style={{ color: C.driftwood, fontStyle: "italic" }}>No note attached</span>}</p>
+                      <button onClick={() => { setDraftNote(entry.note || ""); setIsEditingNote(true); }} style={btnReset}><IconEdit size={16} color={C.driftwood} /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()
+      )}
+
+      {/* Create New POV Modal */}
+      {showNewPovModal && (
+        <div style={{ position: "absolute", inset: 0, background: C.overlay, backdropFilter: "blur(4px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div className="harbor-pop" style={{ background: C.card, borderRadius: 24, padding: 20, width: "100%", maxWidth: 320, display: "flex", flexDirection: "column", gap: 14 }}>
+            <h3 style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, margin: 0, color: C.ink }}>Create New POV</h3>
+            <input value={newPovName} onChange={(e) => setNewPovName(e.target.value)} placeholder="POV Name (e.g., Morning Coffee)" style={{ width: "100%", border: `1px solid ${C.mistDeep}`, borderRadius: 12, padding: "10px 12px", fontSize: 13, outline: "none", background: C.mist, color: C.ink }} />
+            
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "4px 0" }}>
+              {POV_SWATCHES.map((swatch) => (
+                <button key={swatch} onClick={() => setNewPovColor(swatch)} style={{ width: 24, height: 24, borderRadius: "50%", background: swatch, border: newPovColor === swatch ? `2px solid ${C.ink}` : "none", cursor: "pointer", flexShrink: 0 }} />
+              ))}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <button onClick={async () => { if (await createPov(newPovName, newPovColor, newPovDescription)) setShowNewPovModal(false); }} style={{ flex: 1, background: C.harbor, color: "#FFF", border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Create</button>
+              <button onClick={() => setShowNewPovModal(false)} style={{ flex: 1, background: C.mist, color: C.ink, border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Modal */}
+      {confirmClear && (
+        <div style={{ position: "absolute", inset: 0, background: C.overlay, backdropFilter: "blur(4px)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div className="harbor-pop" style={{ background: C.card, borderRadius: 24, padding: 20, width: "100%", maxWidth: 280, textAlign: "center" }}>
+            <h3 style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 600, margin: "0 0 8px", color: C.ink }}>Clear All Data?</h3>
+            <p style={{ fontSize: 12.5, color: C.driftwood, margin: "0 0 16px" }}>This action cannot be undone.</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={async () => { await persistPovs([]); await persistEntries([]); await persistMedia([]); setConfirmClear(false); setProfileOpen(false); showToast("Data cleared"); }} style={{ flex: 1, background: C.clay, color: "#FFF", border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+              <button onClick={() => setConfirmClear(false)} style={{ flex: 1, background: C.mist, color: C.ink, border: "none", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<HarborApp />);
+</script>
+</body>
+</html>
